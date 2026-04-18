@@ -1,10 +1,9 @@
 # ToraBot
 
-Telegram + Discord 向けパーソナルAIアシスタント。
+Discord 向けパーソナルAIアシスタント。
 
 ## 構成
 
-- `bot.py` — Telegram bot（python-telegram-bot使用）
 - `discord_bot.py` — Discord bot
 - `ingest.py` — データ取り込み
 
@@ -17,7 +16,6 @@ Telegram + Discord 向けパーソナルAIアシスタント。
 
 ```bash
 # 起動（バックグラウンド）
-python bot.py >> bot.log 2>> bot.err &
 python discord_bot.py >> discord_bot.log 2>> discord_bot.err &
 python ingest.py >> ingest.log 2>> ingest.err &
 ```
