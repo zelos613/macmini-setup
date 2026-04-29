@@ -1,25 +1,37 @@
-# ToraBot
+# ToraDiscordBot
 
-Discord 向けパーソナルAIアシスタント。
+「とらめも交流所」Discord サーバーの永続ロガー＆日次・週次サマリーBot（Node.js）。
 
 ## 構成
 
-- `discord_bot.py` — Discord bot
-- `ingest.py` — データ取り込み
+- `bot.js` — Discord bot 本体（メッセージ蓄積・スコアリング・サマリー投稿）
+- `auto-update.py` — GitHub から最新版を自動取得するスクリプト
 
-## LLM連携
+## 主な機能
 
-1. **Ollama**（優先）: `http://localhost:11434` / モデル: `gemma4:e4b`
-2. **Grok API**（フォールバック）
+- Discord メッセージを SQLite に永続保存
+- スコアリング: `(reaction×2 + reply×1.5 + thread×3) × 時間減衰係数(24h以内: 1.2)`
+- 日次・週次サマリーを Claude API で生成し Discord + ToraVault に投稿
 
-## 起動・ログ
+## launchd
+
+| ラベル | 種別 | 対象 |
+|---|---|---|
+| `com.toradiscordbot` | KeepAlive（常駐） | `bot.js` |
+| `com.toradiscordbot-autoupdate` | 定時（自動更新） | `auto-update.py` |
 
 ```bash
-# 起動（バックグラウンド）
-python discord_bot.py >> discord_bot.log 2>> discord_bot.err &
-python ingest.py >> ingest.log 2>> ingest.err &
+# 再起動
+launchctl stop com.toradiscordbot && launchctl start com.toradiscordbot
+
+# ログ確認
+tail -f ~/toradiscordbot/bot.log
 ```
 
 ## 環境変数
 
-`~/.torabot.env` を参照。テンプレートは `dotfiles/.torabot.env.template`。
+`~/.toradiscordbot.env` を参照。
+
+## ランタイム
+
+Node.js v22 LTS（`/opt/homebrew/opt/node@22/bin/node`）、`better-sqlite3` 使用

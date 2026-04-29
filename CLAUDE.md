@@ -31,7 +31,20 @@ Discordサーバー向けの多機能Bot（Node.js）。スケジューラ・ス
 
 ### Ollama（ローカルLLM）
 - **URL**: `http://localhost:11434`
-- **使用モデル**: `gemma4:e4b`（zelopersonal経由で呼び出し）
+- **launchd**: `homebrew.mxcl.ollama`（brew services 管理）
+- **使用モデル**: `gemma4:e4b`（高精度）/ `gemma4:e2b`（高速）— zelopersonal 経由で呼び出し
+
+### llama.cpp（ローカルLLM）
+- **URL**: `http://localhost:8081`
+- **モデル**: `~/.local/share/llama-models/Qwen3.6-35B-A3B-UD-IQ3_XXS.gguf`
+- **launchd**: 未登録（手動起動）
+- **起動コマンド**: `llama-server --model ~/.local/share/llama-models/Qwen3.6-35B-A3B-UD-IQ3_XXS.gguf --port 8081 --ctx-size 16384 --n-gpu-layers 0 --mmap --flash-attn on --threads 8`
+
+### homeagent-monitor（ヘルスチェック）
+- **場所**: `~/claude-agent/`
+- **launchd**: `com.homeagent-monitor`（15分ごとに実行）
+- **役割**: `com.zelopersonal-discord` / `com.toradiscordbot` の死活監視・自動修復
+- **ログ**: `~/claude-agent/logs/monitor.log` / `actions.md`
 
 ### iCloud Vault
 - **パス**: `~/Library/Mobile Documents/com~apple~CloudDocs/ToraVault`
@@ -56,7 +69,9 @@ macmini-setup/
 ├── CLAUDE.md          # このファイル：全体概要
 ├── services/          # 各サービスの詳細メモ
 │   ├── zelopersonal.md
-│   └── toradiscordbot.md
+│   ├── toradiscordbot.md
+│   ├── homeagent-monitor.md
+│   └── auto-update.py / com.toradiscordbot-autoupdate.plist
 └── dotfiles/
     └── .torabot.env.template
 ```
