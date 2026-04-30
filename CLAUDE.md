@@ -46,9 +46,22 @@ Discordサーバー向けの多機能Bot（Node.js）。スケジューラ・ス
 - **役割**: `com.zelopersonal-discord` / `com.toradiscordbot` の死活監視・自動修復
 - **ログ**: `~/claude-agent/logs/monitor.log` / `actions.md`
 
+### hermesagent（個人AI秘書）
+- **場所**: `~/.hermes/`
+- **launchd**: `com.hermesagent`（常駐 gateway）
+- **役割**: パーソナルAIアシスタント。ターミナル・ブラウザ・ファイル操作等を統合制御
+- **設定**: `~/.hermes/config.yaml`
+- **スキル**: `~/.hermes/skills/` に永続化
+- **LLM連携**: Ollama (gemma4:e2b/e4b), Claude API, 他
+
+#### MCP サーバー
+- **context-mode**: FTS5 検索・サンドボックス出力（98% トークン削減）
+  - 11 ツール有効: `ctx_execute`, `ctx_batch_execute`, `ctx_search`, `ctx_fetch_and_index` 等
+  - 登録コマンド: `hermes mcp add context-mode --command context-mode`
+
 ### iCloud Vault
 - **パス**: `~/Library/Mobile Documents/com~apple~CloudDocs/ToraVault`
-- zelopersonalがVaultへの読み書きに使用
+- zelopersonal / hermesagent が Vault への読み書きに使用
 
 ## 外部API連携
 
