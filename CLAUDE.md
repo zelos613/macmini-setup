@@ -55,6 +55,8 @@ Discordサーバー向けの多機能Bot（Node.js）。スケジューラ・ス
 - **LLM連携**: Ollama (gemma4:e2b/e4b), Claude API, 他
 
 #### MCP サーバー
+  - **test-mcp**: Test MCP server for demonstration
+
 - **context-mode**: FTS5 検索・サンドボックス出力（98% トークン削減）
   - 11 ツール有効: `ctx_execute`, `ctx_batch_execute`, `ctx_search`, `ctx_fetch_and_index` 等
   - 登録コマンド: `hermes mcp add context-mode --command context-mode`
