@@ -1,0 +1,66 @@
+#!/bin/bash
+# Quick reference for Mac Mini auto-update commands
+#
+# After performing important operations, run the appropriate command to update CLAUDE.md
+
+SPEC_UPDATER="$HOME/macmini-setup/scripts/auto-update-specs.py"
+
+# Detect what was just done and update accordingly
+case "${1}" in
+  mcp-add)
+    echo "MCP server added. Usage: mcp-add <name> <description>"
+    shift
+    python3 "$SPEC_UPDATER" mcp-add "$@"
+    ;;
+  
+  service-add)
+    echo "launchd service added. Usage: service-add <label> <description> <path>"
+    shift
+    python3 "$SPEC_UPDATER" service-add "$@"
+    ;;
+  
+  skill-create)
+    echo "Skill created. Usage: skill-create <name> <title> <category>"
+    shift
+    python3 "$SPEC_UPDATER" skill-create "$@"
+    ;;
+  
+  model-add)
+    echo "LLM model added. Usage: model-add <type> <model-name> <model-path>"
+    shift
+    python3 "$SPEC_UPDATER" model-add "$@"
+    ;;
+  
+  help|--help|-h)
+    cat <<EOF
+Mac Mini CLAUDE.md Auto-Update Helper
+
+Usage: update-specs <action> [args...]
+
+Actions:
+  mcp-add <name> <description>
+    Register MCP server in CLAUDE.md
+    Example: update-specs mcp-add context-mode "FTS5 search & sandbox"
+  
+  service-add <label> <description> <path>
+    Register launchd service
+    Example: update-specs service-add com.example.service "Service Name" ~/.example
+  
+  skill-create <name> <title> <category>
+    Record skill creation
+    Example: update-specs skill-create my-skill "My Skill" development
+  
+  model-add <type> <model-name> <model-path>
+    Register LLM model (type: ollama|llama.cpp)
+    Example: update-specs model-add ollama mistral ~/.ollama/models/mistral
+
+Log: tail -f ~/macmini-setup/logs/auto-update.log
+EOF
+    ;;
+  
+  *)
+    echo "Unknown action: $1"
+    echo "Run: update-specs help"
+    exit 1
+    ;;
+esac

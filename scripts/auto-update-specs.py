@@ -64,38 +64,19 @@ def add_mcp_server(name, description):
     if not content:
         return False
 
-    # Find MCP section or create it
-    mcp_section = f"\n#### MCP サーバー\n- **{name}**: {description}"
-
     if "#### MCP サーバー" in content:
         # Already has MCP section, append to it
-        lines = content.split("\n")
-        insert_idx = None
-
-        for i, line in enumerate(lines):
-            if line == "#### MCP サーバー":
-                # Find the last MCP entry
-                for j in range(i + 1, len(lines)):
-                    if not lines[j].startswith("  - **") and lines[j].strip():
-                        insert_idx = j
-                        break
-                if insert_idx is None:
-                    insert_idx = i + 1
-                break
-
-        if insert_idx:
-            lines.insert(
-                insert_idx, f"  - **{name}**: {description}\n"
-            )
-            content = "\n".join(lines)
-        else:
-            content += mcp_section
-
+        mcp_entry = f"- **{name}**: {description}\n  - Auto-registered via hermes mcp add"
+        content = content.replace(
+            "#### MCP サーバー",
+            f"#### MCP サーバー\n{mcp_entry}",
+        )
     else:
         # No MCP section yet, add before iCloud Vault
+        mcp_section = f"#### MCP サーバー\n- **{name}**: {description}\n  - Auto-registered via hermes mcp add\n"
         content = content.replace(
             "### iCloud Vault",
-            f"#### MCP サーバー\n- **{name}**: {description}\n\n### iCloud Vault",
+            mcp_section + "\n### iCloud Vault",
         )
 
     write_claude(content)
