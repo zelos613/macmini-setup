@@ -75,11 +75,6 @@ Discordサーバー向けの多機能Bot（Node.js）。スケジューラ・ス
 - `~/.torabot.env` — zelopersonal用（テンプレート: [`dotfiles/.torabot.env.template`](dotfiles/.torabot.env.template)）
 - `~/.toradiscordbot.env` — toradiscordbot用
 
-## スキル
-
-
-- `test-skill` (development): Test Skill for Demo
-
 ## ディレクトリ構成
 
 ```
