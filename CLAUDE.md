@@ -102,7 +102,12 @@ macmini-setup/
 │   ├── zelopersonal.md
 │   ├── toradiscordbot.md
 │   ├── homeagent-monitor.md
+│   ├── hermesagent.md
+│   ├── vault-auto-summarize.md
 │   └── auto-update.py / com.toradiscordbot-autoupdate.plist
+├── docs/              # 横断トピック・ハマりどころ集
+│   ├── git-auto-push.md
+│   └── launchd-tcc-icloud.md
 └── dotfiles/
     └── .torabot.env.template
 ```
