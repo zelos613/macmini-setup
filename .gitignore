@@ -2,3 +2,13 @@
 *.env
 !*.env.template
 .DS_Store
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# logs（run-time に書き換わるため git に入れない）
+logs/*.log
+logs/*.err
+logs/*.out

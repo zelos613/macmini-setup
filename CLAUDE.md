@@ -69,9 +69,17 @@ Discordサーバー向けの多機能Bot（Node.js）。スケジューラ・ス
   - 11 ツール有効: `ctx_execute`, `ctx_batch_execute`, `ctx_search`, `ctx_fetch_and_index` 等
   - 登録コマンド: `hermes mcp add context-mode --command context-mode`
 
+### vault-auto-summarize（ToraVault 自動要約）
+- **場所**: `~/macmini-setup/scripts/vault-auto-summarize.py`
+- **launchd**: `com.toravault.auto-summarize`（常駐）
+- **役割**: ToraVault の `raw-sources/` を監視し、新規ファイルを Claude Sonnet で要約 → `wiki/summaries/` に保存 → Discord 通知
+- **ランタイム**: `~/macmini-setup/.venv/bin/python3`（Homebrew Python 3.14、`--copies` で実体バイナリ。iCloud アクセス用 FDA 付与対象）
+- **詳細**: [`services/vault-auto-summarize.md`](services/vault-auto-summarize.md) / [`docs/launchd-tcc-icloud.md`](docs/launchd-tcc-icloud.md)
+
 ### iCloud Vault
 - **パス**: `~/Library/Mobile Documents/com~apple~CloudDocs/ToraVault`
-- zelopersonal / hermesagent が Vault への読み書きに使用
+- zelopersonal / hermesagent / vault-auto-summarize が Vault への読み書きに使用
+- **注意**: launchd 子プロセスから iCloud にアクセスするには TCC の「フルディスクアクセス」を実行バイナリに付与する必要あり（[docs/launchd-tcc-icloud.md](docs/launchd-tcc-icloud.md)）
 
 ## 外部API連携
 
