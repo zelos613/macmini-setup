@@ -76,6 +76,12 @@ Discordサーバー向けの多機能Bot（Node.js）。スケジューラ・ス
 - **ランタイム**: `~/macmini-setup/.venv/bin/python3`（Homebrew Python 3.14、`--copies` で実体バイナリ。iCloud アクセス用 FDA 付与対象）
 - **詳細**: [`services/vault-auto-summarize.md`](services/vault-auto-summarize.md) / [`docs/launchd-tcc-icloud.md`](docs/launchd-tcc-icloud.md)
 
+
+### Agentmemory（agentmemory メモリエンジン（コーディング観察の自動キャプチャ・圧縮））
+- **場所**: `~/Library/LaunchAgents/com.agentmemory.plist`
+- **launchd**: `com.agentmemory`（常駐）
+- **役割**: agentmemory メモリエンジン（コーディング観察の自動キャプチャ・圧縮）
+
 ### iCloud Vault
 - **パス**: `~/Library/Mobile Documents/com~apple~CloudDocs/ToraVault`
 - zelopersonal / hermesagent / vault-auto-summarize が Vault への読み書きに使用
