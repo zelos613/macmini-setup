@@ -98,6 +98,52 @@ return client
 3. 候補が見つかったら `_OAUTH_SNAKE_CASE_TRIGGERS` に追加
 4. 下記の credential pool リセット手順を実行 → `launchctl stop com.hermesagent` で再起動
 
+### 4. CLI 外部 refresh で auth.json が古いまま 401 → exhausted ロック（2026-05-16修正）
+
+**症状**: Claude Code CLI が裏で OAuth refresh → キーチェーンに新トークン
+（`sk-ant-oat01-CW6L0poj...`）が書き込まれるが、Hermes の
+`auth.json` は古いトークン（`sk-ant-oat01-gVIbn-...`）のまま。古い
+トークンで Anthropic を叩いて 401 → `mark_exhausted_and_rotate` が
+唯一の anthropic エントリを exhausted にして 1時間ロック → 「No
+Anthropic credentials found」が連発し fallback (gemma4:e4b) に落ちる。
+
+**真因**: OAuth refresh token は **single-use**。CLI が外部で消費すると
+Hermes 側の refresh も無効化される。`_sync_anthropic_entry_from_credentials_file`
+は起動時 + acquire_lease 時に走るが、稼働中の 401 では呼ばれず、即
+exhausted に倒れていた。
+
+**修正ファイル**: `~/.hermes/hermes-agent/agent/credential_pool.py`
+- `mark_exhausted_and_rotate()` 入口に 401 リカバリパスを追加。
+  `status_code == 401` かつ `provider == "anthropic"` かつ
+  `entry.source == "claude_code"` のとき、まず
+  `_sync_anthropic_entry_from_credentials_file()` を呼んでキーチェーン
+  最新値を auth.json に取り込む。access_token が実際に変わっていれば
+  exhausted にせずそのままエントリを返し、上位レイヤがリトライで成功できる。
+
+**手動復旧手順**（パッチ前の状態に当たった場合）:
+
+```python
+import json, subprocess
+res = subprocess.run(['security', 'find-generic-password',
+                      '-s', 'Claude Code-credentials', '-w'],
+                     capture_output=True, text=True)
+o = json.loads(res.stdout.strip())['claudeAiOauth']
+with open('/Users/mame/.hermes/auth.json') as f: data = json.load(f)
+for e in data['credential_pool']['anthropic']:
+    if e.get('source') == 'claude_code':
+        e['access_token'] = o['accessToken']
+        e['refresh_token'] = o['refreshToken']
+        e['expires_at_ms'] = o['expiresAt']
+        e['expires_at'] = o['expiresAt'] / 1000
+        for k in ('last_status', 'last_status_at', 'last_error_code',
+                  'last_error_reason', 'last_error_message',
+                  'last_error_reset_at', 'last_refresh'):
+            e[k] = None
+with open('/Users/mame/.hermes/auth.json', 'w') as f: json.dump(data, f, indent=4)
+```
+
+その後 `launchctl stop com.hermesagent && launchctl start com.hermesagent`。
+
 ## credential pool exhausted 時のリセット手順
 
 ```python
