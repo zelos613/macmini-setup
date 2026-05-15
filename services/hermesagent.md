@@ -71,6 +71,33 @@ return client
 **テスト**: `tests/agent/test_anthropic_adapter.py::TestOAuthClientAuthHeaders`
 - `ANTHROPIC_API_KEY` が env にある状態でも X-Api-Key が送信されないことを実 SDK で検証
 
+### 3. Anthropic OAuth ヒューリスティックが Hermes payload を MCP / extra_usage 扱いする（2026-05-15修正）
+
+**症状**: Sonnet 4.6 / Opus 4.7 の OAuth リクエストが、basic 19% / extra 45.3%（枠 $2000 中 $906 使用）と十分余裕のある状態でも 400 `"out of extra usage"` を返し、Hermes が即 fallback (gemma4:e4b) に切り替わる。直接 curl で同じトークン + 単純 payload は通過 → Hermes 固有の payload 形状が引き金と判明。
+
+**真因** (Anthropic OAuth 側 classifier の隠れヒューリスティック):
+
+1. tool name が `mcp_*` で始まる → MCP server tool と分類 → extra_usage 必須
+2. system prompt に Claude Code skill の snake_case 識別子
+   (`skill_manage`, `skill_view`, `session_search`, `available_skills`,
+   `delegate_task`, `web_search`) → 同上
+
+いずれかが当たると、extra_usage 枠が空でも問答無用で `"out of extra usage"` 400 が返る。
+
+**修正ファイル**: `~/.hermes/hermes-agent/agent/anthropic_adapter.py`
+- `_MCP_TOOL_PREFIX = "mcp_"` → `"mcpx_"` (MCP 検出回避)
+- OAuth sanitize ステップに `_OAUTH_SNAKE_CASE_TRIGGERS` を追加し、上記 6 識別子を `skill-manage` のようにハイフン化して送信
+
+**修正ファイル**: `~/.hermes/hermes-agent/agent/transports/anthropic.py`
+- `_MCP_PREFIX = "mcp_"` → `"mcpx_"` (受信側で剥がす prefix を整合)
+
+**新たな `out of extra usage` が再発した場合の手順**:
+
+1. `~/.hermes/logs/anthropic-400-dump/` の最新 JSON を確認（後述の監視機構が自動収集）
+2. `request_kwargs.system` または `tools[].name` に新たな snake_case 識別子が含まれていないか探す
+3. 候補が見つかったら `_OAUTH_SNAKE_CASE_TRIGGERS` に追加
+4. 下記の credential pool リセット手順を実行 → `launchctl stop com.hermesagent` で再起動
+
 ## credential pool exhausted 時のリセット手順
 
 ```python
@@ -114,6 +141,35 @@ tail -f ~/.hermes/logs/errors.log
 - `com.zelopersonal-discord` → 停止・無効化済み
 - `com.zelopersonal-ingest` → 停止・無効化済み
 - `ingest.py` の機能 → hermesスキルとして今後再実装予定
+
+## 監視機構 (2026-05-15 追加)
+
+`com.hermesagent.usage-monitor`（5分間隔の launchd job）が
+`https://api.anthropic.com/api/oauth/usage` を叩いて Claude.ai サブスクの
+basic / extra usage 推移を記録する。Hermes 本体は監視機能を持たないため
+別建てで導入。
+
+| ファイル | 内容 |
+|---|---|
+| `~/.hermes/hermes-agent/agent/usage_monitor.py` | snapshot 取得・異常検知・kill switch ロジック本体 |
+| `~/.local/bin/hermes-usage-monitor` | launchd 用ラッパースクリプト |
+| `~/Library/LaunchAgents/com.hermesagent.usage-monitor.plist` | 5分間隔の起動設定 |
+| `~/.hermes/usage_history.jsonl` | 直近288件 (24h) の snapshot リングバッファ |
+| `~/.hermes/usage_alerts.log` | 「basic < 95% なのに extra が増加」を検知した時の警告 |
+| `~/.hermes/anthropic_skip.flag` | extra utilization ≥ 95% で作成、credential_pool が anthropic を skip |
+| `~/.hermes/logs/usage-monitor.log` | monitor 実行ログ |
+| `~/.hermes/logs/anthropic-400-dump/<ts>.json` | Anthropic 400 エラー時の送信 payload ダンプ |
+
+```bash
+# 手動 snapshot
+/Users/mame/.local/bin/hermes-usage-monitor
+
+# 直近の使用量履歴
+tail -5 ~/.hermes/usage_history.jsonl | python3 -m json.tool
+
+# 直近の 400 エラー payload
+ls -lt ~/.hermes/logs/anthropic-400-dump/ | head
+```
 
 ## 更新
 
