@@ -171,6 +171,41 @@ tail -5 ~/.hermes/usage_history.jsonl | python3 -m json.tool
 ls -lt ~/.hermes/logs/anthropic-400-dump/ | head
 ```
 
+## モデル切替（スレッドごとに変更可能）
+
+Discord スレッドは Hermes 内部で個別 `session_key` に分かれており、
+各 session は独立した AIAgent インスタンスを持つ
+(`gateway/run.py` の `_running_agents` / `_session_model_overrides`)。
+`/model` コマンドは実行したスレッドだけに反映される。
+
+| 操作 | 効果 |
+|---|---|
+| スレッドAで `/model claude-opus-4-7` | スレッドAのみ Opus |
+| スレッドBは何もせず | `model.default`（`claude-sonnet-4-6`）のまま |
+| 新規スレッド | 常に `model.default` で開始 |
+| 同じスレッドの続き | 直前の選択を維持 |
+
+**注意**: `_session_model_overrides` は in-memory のみで永続化されない。
+`launchctl stop com.hermesagent` で再起動すると上書きが消え、
+そのスレッドも `model.default` に戻る → 必要なら再度 `/model` を打つ。
+
+### `/model` autocomplete 候補（2026-05-15 追加）
+
+Discord で `/model` を打った時の autocomplete に以下を表示するよう
+`gateway/platforms/discord.py:2202` 周辺の `slash_model` に
+`@autocomplete("name")` ハンドラを追加済み:
+
+| ラベル | 値 |
+|---|---|
+| Opus 4.7 — highest quality (heavy) | `claude-opus-4-7` |
+| Sonnet 4.6 — balanced default | `claude-sonnet-4-6` |
+| Haiku 4.5 — fast, cheap | `claude-haiku-4-5` |
+| Gemma 4 e4b — local, free | `gemma4:e4b` |
+| Gemma 4 e2b — local, fastest | `gemma4:e2b` |
+
+**`hermes update` で上書きされる可能性あり**。再適用が必要になったら
+`_MODEL_CHOICES` リストと `slash_model_autocomplete` を再追加する。
+
 ## 更新
 
 ```bash
