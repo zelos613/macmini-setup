@@ -98,6 +98,21 @@ return client
 3. 候補が見つかったら `_OAUTH_SNAKE_CASE_TRIGGERS` に追加
 4. 下記の credential pool リセット手順を実行 → `launchctl stop com.hermesagent` で再起動
 
+### 5. `_upsert_entry` がトークン再 seed 時に last_status を引き継いで永久 exhausted ロック（2026-05-16修正）
+
+**症状**: 認証エラーで `last_status=exhausted` が付いた claude_code エントリに、後でキーチェーン経由の新トークン (`/login` 等) が再 seed されても **exhausted フラグが残り続けて使えない**。auth.json 上で「fresh access_token + last_status=exhausted」という不整合な状態になり、cooldown 1時間が経つまで anthropic が選ばれない。
+
+**真因**: `agent/credential_pool.py:_upsert_entry()` が `_seed_from_singletons` から呼ばれる時、`access_token` / `refresh_token` / `expires_at_ms` を上書きするだけで、`last_status`・`last_status_at`・`last_error_*` は触っていなかった。古いトークンに対する exhausted フラグが新トークンに引き継がれていた。
+
+**修正ファイル**: `~/.hermes/hermes-agent/agent/credential_pool.py`
+- `_upsert_entry()` で `access_token` または `refresh_token` の差分が検出された時、`last_status` / `last_status_at` / `last_error_code` / `last_error_reason` / `last_error_message` / `last_error_reset_at` も併せて `None` にリセット。
+
+### 6. shell rc の `ANTHROPIC_API_KEY` が古い revoke 済みトークンで auth.json を汚染（2026-05-16対処）
+
+**症状**: `~/.zprofile` に古い1年トークン (`sk-ant-oat01-bkqSI7E...`) が `export ANTHROPIC_API_KEY=...` で残っていた。Hermes 本体は plist にこの env を渡していないので無害だが、ユーザーシェル上で `hermes` CLI や Hermes Python モジュールを呼び出すたびに `_seed_from_env` が env を拾って auth.json に **revoke 済みトークンの env エントリを再生成** していた。Hermes 本体は keychain 連動の claude_code エントリで動くが、`hermes auth list` や手動デバッグで auth.json を見ると毎回ゴーストエントリが現れて混乱の元になっていた。
+
+**対処**: `~/.zprofile` の `export ANTHROPIC_API_KEY=...` をコメントアウト。Hermes はキーチェーン (`Claude Code-credentials`) 経由の `claude_code` ソースで動作するので env 変数は不要。新しい shell セッションでは env が無くなり、auth.json も clean state を維持する。
+
 ### 4. CLI 外部 refresh で auth.json が古いまま 401 → exhausted ロック（2026-05-16修正）
 
 **症状**: Claude Code CLI が裏で OAuth refresh → キーチェーンに新トークン
