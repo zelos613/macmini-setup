@@ -98,6 +98,30 @@ return client
 3. 候補が見つかったら `_OAUTH_SNAKE_CASE_TRIGGERS` に追加
 4. 下記の credential pool リセット手順を実行 → `launchctl stop com.hermesagent` で再起動
 
+### 7. `_refresh_entry` 失敗時のログが debug レベルで埋もれていた（2026-05-16修正）
+
+**症状**: トークン期限切れ後 Hermes の自動 refresh が失敗 → 即 exhausted →
+1時間ロック、という連鎖が起きた時、`errors.log` には「No Anthropic
+credentials found」しか残らず、**真因の refresh 失敗理由が見えない**。
+debug レベルの `logger.debug("Credential refresh failed...")` だけで、
+errors.log (WARNING 以上) には届かなかった。
+
+**修正ファイル**: `~/.hermes/hermes-agent/agent/credential_pool.py`
+
+| ログ | 旧レベル | 新レベル | 内容 |
+|---|---|---|---|
+| refresh API 呼び出し失敗 | debug | **warning** | 例外型 + メッセージを残す |
+| retry 失敗（credentials file resync 後） | debug | **warning** | 同上 |
+| credentials file 書き込み失敗 | debug | **warning** | OAuth ローテ後の永続化失敗 |
+| 最終的に exhausted | (なし) | **warning** | 「諦めた」明示ログ |
+| credentials file から sync 成功 | debug | **info** | 外部 rotate を拾った |
+| 期限切れ前に valid token 拾えた | debug | **info** | 救済成功 |
+| retry refresh 成功 | (なし) | **info** | リカバリ成功明示 |
+
+**確認方法**: 次回 refresh 失敗が起きた時、`~/.hermes/logs/errors.log`
+を `grep "credential refresh"` で覗くと、失敗理由（例外型・HTTP コード等）
+が読める。これを見て根本治療に進める。
+
 ### 5. `_upsert_entry` がトークン再 seed 時に last_status を引き継いで永久 exhausted ロック（2026-05-16修正）
 
 **症状**: 認証エラーで `last_status=exhausted` が付いた claude_code エントリに、後でキーチェーン経由の新トークン (`/login` 等) が再 seed されても **exhausted フラグが残り続けて使えない**。auth.json 上で「fresh access_token + last_status=exhausted」という不整合な状態になり、cooldown 1時間が経つまで anthropic が選ばれない。
