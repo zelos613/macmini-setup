@@ -98,6 +98,44 @@ return client
 3. 候補が見つかったら `_OAUTH_SNAKE_CASE_TRIGGERS` に追加
 4. 下記の credential pool リセット手順を実行 → `launchctl stop com.hermesagent` で再起動
 
+### 8. CLI ⇄ Hermes 間で refresh_token が競合し `/login` 手動介入が必要だった（2026-05-16修正）
+
+**症状**: トークン期限切れ前後で、Claude CLI 側と Hermes 側が同じ
+single-use refresh_token を取り合い、片方が refresh した時点で
+もう片方は invalid_grant (400) を食らう。今までは Hermes が
+`_write_claude_code_credentials` で `~/.claude/.credentials.json` にしか
+書き戻していなかったため、CLI 側（キーチェーンを真実とする）に反映されず、
+CLI 起動時にまた古いキャッシュで refresh しに行く悪循環。結果として
+ユーザーが手動で `/login` を打って同期する運用になっていた。
+
+**修正ファイル①**: `~/.hermes/hermes-agent/agent/anthropic_adapter.py`
+
+- 新関数 `_write_claude_code_credentials_to_keychain(payload)` を追加。
+  `security add-generic-password -U -s "Claude Code-credentials" -a "" -w <json>`
+  でキーチェーンに upsert。
+- `_write_claude_code_credentials()` を「**キーチェーン優先 + credentials.json
+  はフォールバック**」に変更。`subscriptionType`・`scopes` も既存値から
+  自動で補完して書き戻す（CLI 側の認証チェックが満たすため必須）。
+
+**修正ファイル②**: `~/.hermes/hermes-agent/agent/credential_pool.py`
+
+- `_refresh_entry()` 入口に「**Pre-emptive sync**」を追加。
+  refresh API を叩く **前に** `_sync_anthropic_entry_from_credentials_file`
+  を呼んでキーチェーン側の最新トークンを確認。
+- 新トークンが既に有効期限内なら refresh をスキップして直接採用 →
+  refresh_token 競合そのものを回避。
+
+**狙い**: 「**キーチェーンを single source of truth にする**」。Hermes と
+Claude CLI のどちらが先に refresh しても、書き先がキーチェーン唯一
+なので相手は次に読みに来た瞬間に新トークンを拾える。
+`/login` 手動介入も不要、Hermes 再起動も不要。
+
+**How to apply**: `hermes update` でこのパッチが消えた場合、
+`_write_claude_code_credentials` 関数全体と、その上に
+`_write_claude_code_credentials_to_keychain` 関数を再追加。
+あわせて `credential_pool.py:_refresh_entry()` の入口の
+「Proactive sync」ブロックを再注入。
+
 ### 7. `_refresh_entry` 失敗時のログが debug レベルで埋もれていた（2026-05-16修正）
 
 **症状**: トークン期限切れ後 Hermes の自動 refresh が失敗 → 即 exhausted →
