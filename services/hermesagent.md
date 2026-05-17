@@ -330,6 +330,81 @@ tail -5 ~/.hermes/usage_history.jsonl | python3 -m json.tool
 ls -lt ~/.hermes/logs/anthropic-400-dump/ | head
 ```
 
+## /login 完全自動化 (Playwright OAuth, 2026-05-17 追加)
+
+### 動機
+
+Anthropic OAuth の `refresh_token` は single-use かつ revoke 可能なため、
+revoke されると `/login`（PKCE フロー）以外で復旧手段がない。これまでは
+Mac Mini にターミナルから手動で `/login` を打つ必要があり、外出先からの
+復旧コストが高かった（Chrome Remote Desktop → ターミナル → 入力）。
+
+`claude auth login` が **`BROWSER` 環境変数を honor する**こと
+（fake-browser テストで確認）を利用し、OAuth consent ページの「承認する」
+ボタンを Playwright で自動クリックして PKCE フローを無人完了させる。
+
+### 構成要素
+
+| ファイル | 役割 |
+|---|---|
+| `~/.hermes/hermes-agent/agent/oauth_browser.py` | URL を受け取り Playwright で開いて「承認する」を自動クリック |
+| `~/.hermes/hermes-agent/agent/oauth_bootstrap.py` | 初回手動セットアップ用（claude.ai に手動ログイン → cookie 永続化） |
+| `~/.local/bin/hermes-oauth-browser` | `BROWSER=$0` 用ラッパー |
+| `~/.local/bin/hermes-oauth-bootstrap` | bootstrap スクリプト起動 |
+| `~/.local/bin/hermes-auto-relogin` | `BROWSER=hermes-oauth-browser claude auth login` を実行 |
+| `~/.hermes/playwright-profile/` | Chromium 永続プロファイル（claude.ai セッション cookie） |
+| `~/.hermes/logs/oauth-browser.log` | Playwright 実行ログ |
+| `~/.hermes/logs/auto-relogin.log` | オーケストレータ実行ログ |
+
+### 重要な設計判断
+
+- **Playwright 同梱の chromium ではなく `channel="chrome"` でシステム
+  Google Chrome を駆動**。同梱 chromium は Google SSO / claude.ai に
+  「安全ではないブラウザ」として弾かれる。
+- **`--disable-blink-features=AutomationControlled` + `ignore_default_args=["--enable-automation"]`** で
+  `navigator.webdriver` シグナルを抑止。
+- **永続プロファイル方式**。Playwright が毎回ログイン処理をするのではなく、
+  bootstrap で 1 回だけ手動 SSO → cookie を保存 → 以降は consent ボタン
+  クリックだけで完了。所要時間 6 秒（実測）。
+- **「承認する」（日本語）セレクタ**。claude.ai の OAuth consent ページは
+  ブラウザロケールで翻訳されるため、Japanese を最優先・英語フォールバック。
+
+### 初回セットアップ（1 回だけ）
+
+```bash
+# Chromium 永続プロファイルに claude.ai のログイン cookie を保存
+hermes-oauth-bootstrap
+# → Chrome ウィンドウが開く → claude.ai に手動ログイン → ウィンドウを閉じる
+```
+
+### 単発実行
+
+```bash
+hermes-auto-relogin
+# → Chrome が一瞬開いて自動で「承認する」 → keychain にトークン保存
+```
+
+### auth-health-monitor との統合
+
+`com.hermesagent.auth-health-monitor`（5 分間隔）が pool stuck を検知すると：
+
+1. 直近 30 分以内に auto-relogin 試行済みならスキップ（暴走防止）
+2. それ以外なら `hermes-auto-relogin` を呼び出し
+3. 成功 → `auth.json` を keychain と強制同期して**静かに**完了（無通知）
+4. 失敗 → Discord に通知（「Playwright profile 期限切れの可能性、
+   `hermes-oauth-bootstrap` 再実行を」とガイド）
+
+これにより通常の token revoke は人間が気付かないうちに自動復旧する。
+
+### トラブルシュート
+
+| 症状 | 原因 | 対処 |
+|---|---|---|
+| `redirected to /login` ログ | claude.ai セッション cookie 期限切れ | `hermes-oauth-bootstrap` 再実行 |
+| `no Allow/Authorize button found` | consent ページの button テキストが変わった | `~/.hermes/logs/oauth-browser-failure.png` を確認しセレクタ追加 |
+| 「安全ではないブラウザ」拒否 | システム Chrome が立ち上がっていない / `channel="chrome"` が効いていない | `/Applications/Google Chrome.app` 存在確認 |
+| auto-relogin が timeout | Chrome がフリーズまたは consent ページ表示遅延 | `AUTO_RELOGIN_TIMEOUT_SEC` (現状 120s) を伸ばす |
+
 ## モデル切替（スレッドごとに変更可能）
 
 Discord スレッドは Hermes 内部で個別 `session_key` に分かれており、
