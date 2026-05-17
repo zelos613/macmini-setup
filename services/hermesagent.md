@@ -98,6 +98,42 @@ return client
 3. 候補が見つかったら `_OAUTH_SNAKE_CASE_TRIGGERS` に追加
 4. 下記の credential pool リセット手順を実行 → `launchctl stop com.hermesagent` で再起動
 
+### 9. 「`/login` 完全自動化」は OAuth プロトコル上不可能 → 即時通知で対応（2026-05-17）
+
+**経緯**: 8. の修正後も同じ「No Anthropic credentials」障害が再発した。
+詳細調査の結果、**OAuth refresh_token が Anthropic 側で revoke された場合、
+Hermes も CLI も同じ古い token を持ち続けて refresh API は 400 invalid_grant
+を返し続ける**ことが判明。回復には新規 OAuth PKCE フロー (`/login`) が必須で、
+これにはブラウザ認証同意が要るため Hermes 単独では実行不可能。
+
+**結論**: 「ゼロ介入の完全自動化」は OAuth プロトコル上の限界で不可能。
+代わりに「障害発生から復旧までを最短化」する仕組みを導入した。
+
+**新規ファイル**:
+
+| ファイル | 役割 |
+|---|---|
+| `~/.hermes/hermes-agent/agent/auth_health_monitor.py` | auth.json の anthropic エントリ全てが `last_status=exhausted` で grace（10分）を超えたら Discord ホームチャンネルに `/login が必要` と通知。復旧したら復旧通知も送る。state file `~/.hermes/auth_alert_state.json` で one-shot semantics（スパム防止） |
+| `~/.local/bin/hermes-auth-health-monitor` | launchd 用ラッパースクリプト |
+| `~/Library/LaunchAgents/com.hermesagent.auth-health-monitor.plist` | 5分間隔の launchd job |
+| `~/.hermes/logs/auth-health-monitor.log` | 実行ログ |
+
+**運用上の挙動**:
+
+1. healthy 状態: ログに `status unchanged (stuck=False)` を残すだけ、Discord には何もしない
+2. healthy → stuck（10分以上 exhausted）: ホームチャンネルに警告投稿、state file 作成
+3. stuck → healthy: 復旧通知投稿、state file 削除
+4. stuck → stuck: 何もしない（再投稿しない）
+
+**通知メッセージに含まれる情報**:
+- 各エントリの ID, source, access_token プレフィックス, stuck 時間（分）
+- 現在のキーチェーン token プレフィックス
+- 復旧手順 (`/login` 実行 → 5分以内に Hermes が自動取り込み)
+
+**Discord 通知の到達経路**: `.env` の `DISCORD_BOT_TOKEN` + `DISCORD_HOME_CHANNEL` を使い、`https://discord.com/api/v10/channels/{id}/messages` に直接 POST。Hermes 本体プロセスに依存しない（Hermes が落ちていても通知される）。
+
+**動作確認**: 2026-05-17 に擬似 stuck 状態でテストし、HTTP 200 で投稿成功・state 遷移正常。
+
 ### 8. CLI ⇄ Hermes 間で refresh_token が競合し `/login` 手動介入が必要だった（2026-05-16修正）
 
 **症状**: トークン期限切れ前後で、Claude CLI 側と Hermes 側が同じ
