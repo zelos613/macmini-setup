@@ -405,6 +405,39 @@ hermes-auto-relogin
 | 「安全ではないブラウザ」拒否 | システム Chrome が立ち上がっていない / `channel="chrome"` が効いていない | `/Applications/Google Chrome.app` 存在確認 |
 | auto-relogin が timeout | Chrome がフリーズまたは consent ページ表示遅延 | `AUTO_RELOGIN_TIMEOUT_SEC` (現状 120s) を伸ばす |
 
+### 既知バグ修正: 2 日間 stuck 問題 (2026-05-19)
+
+**症状**: 2026-05-17 19:57 〜 2026-05-19 までの約 50 時間、`auth.json` の
+`credential_pool.anthropic` が空配列のまま放置。`auxiliary_client:
+no Anthropic credentials found` の警告が 10 分間隔で延々ログに出続けた。
+
+**発見トリガ**: Discord 通知が一度も飛ばなかった（edge transition only な
+ので「stuck → stuck」では鳴らない）。ユーザーが偶然 Discord で `/login`
+を打って気付いた。
+
+**因果連鎖**:
+1. 2026-05-17 17:23 頃 Mac がスリープ (gateway / monitor 両方停止)
+2. 19:52 復帰時に gateway 再起動 → 全リクエストが xai-oauth で完結し
+   anthropic credential pool は **lazy load されない**
+3. 何らかの経路で `auth.json` の `anthropic` が空配列で書き戻される
+4. 19:57 に auth-health-monitor が空 pool を検知 → auto-relogin 試行 → 成功
+5. しかし **当初の `_force_resync_auth_pool()` は「既存 entry の token を
+   更新する」だけで「空 pool に新規 entry を seed しない」設計バグ**
+6. 30 分 cooldown 発動 → 以降は「stuck → stuck」で Discord 通知も鳴らず
+7. 2 日間放置
+
+**修正**: `_force_resync_auth_pool()` を「自前で entry を書き換える」方式
+から「Hermes 本体の `credential_pool.load_pool('anthropic')` を呼んで
+正規 seeder (`_seed_from_singletons` 経由で `read_claude_code_credentials`
+→ `_upsert_entry`) を駆動する」方式に置換。これにより空 pool でも
+keychain から新規 entry が seed される。
+
+**残課題（未修正・優先度低）**:
+- 「stuck → stuck」transition での通知抑制が意図的だが、auto-relogin の
+  cooldown を消費した stuck は通知すべき（24h ごとのリマインダー等）
+- pool が空になる経路の完全特定（lazy load + gateway shutdown のレース
+  が疑われるが未確認）
+
 ## モデル切替（スレッドごとに変更可能）
 
 Discord スレッドは Hermes 内部で個別 `session_key` に分かれており、
