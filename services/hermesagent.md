@@ -436,7 +436,7 @@ keychain から新規 entry が seed される。
 
 1. **prefetch 再 seed**: `evaluate_pool_health()` で stuck 検知時、
    auto-relogin を試す**前に** `_force_resync_auth_pool()` を必ず呼んで
-   `load_pool('anthropic')` を駆動。キーチェーンが ready なら 1 tick で
+   キーチェーンから entry を再 seed。キーチェーンが ready なら 1 tick で
    復活し、auto-relogin もリマインダーも発火しない。
 2. **stuck 継続中の 6h リマインダー**: `STUCK_REMINDER_INTERVAL_SEC=6h`。
    `was_stuck=True` のまま tick が来た時、`last_notified_at` から 6h 経過
@@ -447,6 +447,30 @@ keychain から新規 entry が seed される。
    でないタイミングだと、その読み取りが失敗 → prune → 空配列が auth.json
    に永続化される。完全証拠は当時のログがないため未確定だが、防御策
    (上記 1) で実害は解消される。
+
+### さらなる修正 (2026-05-19 朝): gate bypass
+
+上記 1 の `_force_resync_auth_pool()` 当初実装は `load_pool('anthropic')`
+を呼んでいたが、これが launchd 配下では機能しないことが判明:
+
+- `credential_pool._seed_from_singletons` の冒頭に
+  `is_provider_explicitly_configured("anthropic")` ゲートがあり、
+  False なら早期 return (claude_code を seed しない)。
+- このマシンの設定: `active_provider=None`、`model.provider=xai-oauth`、
+  `ANTHROPIC_API_KEY` 未設定 → **anthropic は「explicit configured」と
+  判定されず gate に阻まれる**。
+- 結果: pool は空のまま prune が回り続け、auxiliary client は
+  `resolve_anthropic_token()` の keychain フォールバックで辛うじて動く
+  ものの、`auxiliary_client: no Anthropic credentials found` 警告が連発。
+- 前回テストが通った原因は、シェルセッションに `ANTHROPIC_API_KEY` が
+  Claude Code CLI から継承されていて gate を通過していた事故 (launchd
+  環境では再現しない)。
+
+**修正**: `_force_resync_auth_pool()` を gate bypass 版に置き換え。
+`read_claude_code_credentials()` を直接呼び、`_upsert_entry` +
+`write_credential_pool` の低レベルプリミティブで直接 pool に書き込む。
+`_seed_from_singletons` のゲートを経由しないため、anthropic が primary
+provider でない構成でも確実に動作する。
 
 ## モデル切替（スレッドごとに変更可能）
 
