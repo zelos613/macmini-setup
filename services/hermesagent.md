@@ -432,11 +432,21 @@ no Anthropic credentials found` の警告が 10 分間隔で延々ログに出�
 → `_upsert_entry`) を駆動する」方式に置換。これにより空 pool でも
 keychain から新規 entry が seed される。
 
-**残課題（未修正・優先度低）**:
-- 「stuck → stuck」transition での通知抑制が意図的だが、auto-relogin の
-  cooldown を消費した stuck は通知すべき（24h ごとのリマインダー等）
-- pool が空になる経路の完全特定（lazy load + gateway shutdown のレース
-  が疑われるが未確認）
+**追加修正 (同日)**:
+
+1. **prefetch 再 seed**: `evaluate_pool_health()` で stuck 検知時、
+   auto-relogin を試す**前に** `_force_resync_auth_pool()` を必ず呼んで
+   `load_pool('anthropic')` を駆動。キーチェーンが ready なら 1 tick で
+   復活し、auto-relogin もリマインダーも発火しない。
+2. **stuck 継続中の 6h リマインダー**: `STUCK_REMINDER_INTERVAL_SEC=6h`。
+   `was_stuck=True` のまま tick が来た時、`last_notified_at` から 6h 経過
+   していれば再通知 (`reminder #N` を付けて)。50h サイレンスの再発防止。
+3. **空配列化経路の有力仮説**: `credential_pool._prune_stale_seeded_entries`
+   が `read_claude_code_credentials()` が空を返した瞬間に `claude_code`
+   entry を削除する設計。スリープ復帰直後にキーチェーンサービスが ready
+   でないタイミングだと、その読み取りが失敗 → prune → 空配列が auth.json
+   に永続化される。完全証拠は当時のログがないため未確定だが、防御策
+   (上記 1) で実害は解消される。
 
 ## モデル切替（スレッドごとに変更可能）
 
