@@ -472,6 +472,35 @@ keychain から新規 entry が seed される。
 `_seed_from_singletons` のゲートを経由しないため、anthropic が primary
 provider でない構成でも確実に動作する。
 
+### さらにさらなる修正 (2026-05-19 昼): prune-proof 化
+
+上記 gate bypass を入れても 5 分ともたず pool が空になる現象が再発:
+- 16:00/05/10 に monitor が「resync wrote pool (1 entry)」を反復
+- 各 monitor tick 直後の 1〜2 分以内に
+  `auxiliary_client: no Anthropic credentials found` 警告
+- auth.json mtime が cron 起動 (16:16:15.192) の 31ms 後 (16:16:15.223) に
+  更新 → 空配列で永続化
+
+原因: **`load_pool('anthropic')` の prune-then-seed パターン**
+1. auxiliary_client は anthropic を要求するたび `_select_pool_entry("anthropic")` →
+   `load_pool("anthropic")` 内部で `_seed_from_singletons` 呼び出し
+2. gate (`is_provider_explicitly_configured("anthropic") == False`) で
+   早期 return → `active_sources` が空のまま `_prune_stale_seeded_entries`
+3. prune の保持条件: `_is_manual_source(source)` or `source in active_sources` or
+   not in `{"claude_code", "hermes_pkce", "env:*"}` → `claude_code` は削除対象
+4. 結果 pool が空配列で auth.json に永続化 → auth-health-monitor が
+   5 分後に復活させるがイタチごっこ
+
+**修正**: `_force_resync_auth_pool()` が書き込む entry の `source` を
+`"claude_code"` → `"manual:claude_code"` に変更。
+`_is_manual_source()` は `manual` および `manual:*` を True 返すので
+prune 永久除外。同時に古い `claude_code` source の重複 entry を削除。
+
+検証:
+- 最小 env で resync → entry 永続化
+- `load_pool('anthropic')` を 5 回連続呼んでも entry 不変
+- `_try_anthropic()` が正常に `AnthropicAuxiliaryClient` を返す
+
 ## モデル切替（スレッドごとに変更可能）
 
 Discord スレッドは Hermes 内部で個別 `session_key` に分かれており、
