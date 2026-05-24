@@ -536,6 +536,48 @@ Discord で `/model` を打った時の autocomplete に以下を表示するよ
 **`hermes update` で上書きされる可能性あり**。再適用が必要になったら
 `_MODEL_CHOICES` リストと `slash_model_autocomplete` を再追加する。
 
+## 既知バグ修正: 1 日以上アイドルしたスレッドで Opus 401 → fallback (2026-05-24)
+
+### 症状
+
+- 1 日前に開始した Discord スレッドで `claude-opus-4-7` 宛に発言
+- `HTTP 401: Invalid authentication credentials` → 即座に `Fallback activated: claude-opus-4-7 → claude-sonnet-4-6`
+- 末尾に `⚠ Auxiliary title generation failed: HTTP 401: ...` も出る
+- ユーザーが `/model claude-opus-4-7` で再選択しても再度 401 ループ
+
+### 根本原因
+
+Anthropic OAuth access_token の有効期限は **約 8 時間**。一方 Hermes は:
+
+1. **メインプロセス**: `_anthropic_api_key` をクライアント構築時にキャッシュし、proactive な expiry チェックなし。401 が返って初めて refresh を試みる（`conversation_loop.py:2017` の `anthropic_auth_retry_attempted` フラグで 1 回のみ）
+2. **aux client (title generation 等)**: `_try_anthropic()` で credential pool entry の `access_token` をそのまま使用。pool entry の expiry も見ていない
+
+→ 23h 放置後の発言で keychain の token が既に expired、メインも aux も古い token で API を叩く → 401。
+
+### 修正内容
+
+`agent/anthropic_adapter.py` に共通ヘルパー `get_fresh_anthropic_oauth_token(buffer_sec=300)` を追加。
+keychain の `expiresAt` を見て残り 5 分以下なら `_refresh_oauth_token` で即時 refresh + keychain 更新。
+
+これを 2 箇所から呼ぶ:
+
+- **`run_agent.py:_anthropic_messages_create`** — メイン Anthropic 呼び出し直前に proactive refresh → 後続の `_try_refresh_anthropic_client_credentials()` が新 token を拾って client 再構築
+- **`agent/auxiliary_client.py:_try_anthropic`** — pool entry token を取得後、proactive refresh で上書き（pool 自体の更新は別 process の auth-health-monitor に任せる）
+
+副作用最小化のため:
+- `explicit_api_key` 指定時は呼び出し側の意図を尊重して触らない
+- refresh 失敗時は既存 token を返す → 既存の 401 リトライ経路で従来通り fallback
+
+### 別問題: Claude Code 2.1.150 の `/login` が keychain を書き換えないケース
+
+今回の障害深掘り中に判明:
+- `claude /login` を CLI/slash の双方で実行しても keychain の `Claude Code-credentials` エントリが更新されない事例があった
+- `hermes-auto-relogin` (Playwright) も「承認する」クリック成功 + `claude auth login exit 0` でも keychain 未更新
+- 結果として **refresh_token も既に消費済 (HTTP 400 invalid_grant)** で復旧手段が無い状態に陥る
+
+→ 一度この状態になると proactive refresh も無力。対処は別ターミナルで対話 `claude` を起動し直して /login → keychain 書き込み確認。
+将来的に `hermes-auto-relogin` の callback flow を Claude Code 2.1.150+ で再検証する課題が残る。
+
 ## 更新
 
 ```bash
