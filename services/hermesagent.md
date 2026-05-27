@@ -46,6 +46,52 @@ CLAUDE_CODE_OAUTH_TOKEN_EXPIRES_AT=<ms epoch>  ← 1年後
 
 ## 既知バグ・修正履歴
 
+### 10. キーチェーン `Claude Code-credentials` エントリの account 名分裂（2026-05-27修正）
+
+**症状**: `claude auth status` は `loggedIn: true` を返すのに、Hermes 側だけ `credential refresh failed ... HTTP 400` → `marking entry exhausted` を繰り返し、`No Anthropic credentials found` で全 Anthropic 呼び出しが失敗。auto-relogin（launchd 1時間ジョブ）の `claude auth login` 自体は毎回成功しているのに、Hermes に伝わらない。
+
+**真因**: Claude Code CLI **2.1.152** から `Claude Code-credentials` キーチェーンエントリを `acct=$USER` で書くようになった（それ以前は `acct=NULL`）。アップグレードを跨いだ環境では両エントリが並存し、Hermes の `_read_claude_code_credentials_from_keychain()` は `security find-generic-password -s ... -w` を `-a` 無指定で呼んでいたため、**古い `acct=NULL` エントリ（revoke 済み refresh_token）を返してしまう**。CLI は新エントリ（`acct=$USER`）を更新し続け、Hermes は旧エントリで refresh API を叩いて 400 で死ぬ、を延々繰り返していた。
+
+**修正ファイル**: `~/.hermes/hermes-agent/agent/anthropic_adapter.py`
+
+1. `_read_claude_code_credentials_from_keychain()`:
+   - `accounts = [os.environ["USER"], ""]` の両方を読みに行く
+   - 複数当たれば `expiresAt` が新しい方を採用（CLI が新エントリへ移行する過渡期対策）
+2. `_write_claude_code_credentials_to_keychain()`:
+   - `-a ""` ハードコードを `-a $USER` に変更（CLI 2.1.152+ と同じエントリに書く）
+
+```python
+# Reader (抜粋)
+accounts = []
+user = os.environ.get("USER") or ""
+if user:
+    accounts.append(user)
+accounts.append("")  # 旧仕様 (acct=NULL)
+
+for acct in accounts:
+    result = subprocess.run(
+        ["security", "find-generic-password",
+         "-s", "Claude Code-credentials",
+         "-a", acct, "-w"],
+        capture_output=True, text=True, timeout=5,
+    )
+    # ... 各 candidate を candidates[] に貯める
+best = max(candidates, key=lambda c: c.get("expiresAt") or 0)
+```
+
+**ワンショット後片付け**（過渡期エントリの削除）:
+```bash
+security delete-generic-password -s "Claude Code-credentials" -a ""
+```
+リーダー側修正だけでも動くが、将来の混乱防止のため旧 `acct=NULL` エントリを消しておく。
+
+**診断シグナル**: 以下が同時に成立していたらこのバグを疑う。
+- `errors.log` に `credential refresh failed ... HTTP 400` + `marking entry exhausted` が周期的（1h毎の auto-relogin と同期して）出る
+- `claude auth status` は `loggedIn: true` を返す
+- `security dump-keychain | grep -B1 'Claude Code-credentials'` で **2エントリ**見える（片方 `acct=NULL`、片方 `acct=$USER`）
+
+**hermes update で上書きされた場合の再適用**: 上記 reader / writer 2 箇所のパッチを再投入。reader は `accounts` リストを組み立てて max(expiresAt) を選ぶ形、writer は `acct = os.environ.get("USER") or ""` を導入する形。
+
 ### 1. context-1m beta × OAuth Bearer 非互換（2026-05-13修正）
 
 **症状**: wiki-notifier cron jobがAnthropicに `context-1m-2025-08-07` betaヘッダーを付けて呼び出すと、API が 400 "This authentication style is incompatible with the long context beta header." を返す。両エントリが exhausted → 1時間全Anthropicリクエストブロック。
