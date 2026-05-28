@@ -46,6 +46,27 @@ CLAUDE_CODE_OAUTH_TOKEN_EXPIRES_AT=<ms epoch>  ← 1年後
 
 ## 既知バグ・修正履歴
 
+### 11. `manual:claude_code` source が自己回復ロジックを全て無効化していた（2026-05-28修正・anthropic 枯渇の真因）
+
+**前提**: primary provider は `grok-4.3`/`xai-oauth` で、**anthropic はフォールバック**。そのため `is_provider_explicitly_configured("anthropic")` が False となり、`_seed_from_singletons()` は早期 return してキーチェーンから `claude_code` エントリを自動 seed しない。よって anthropic クレデンシャルは手動追加（`hermes auth add`）するしかなく、source は `manual:claude_code` になる。この `manual:` 接頭辞は意図的で、`_prune_stale_seeded_entries()` が `_is_manual_source(source)` の True を残す **= prune 保護の仕組み**。
+
+**真因**: `credential_pool.py` の自己回復ロジック**6箇所すべてが `entry.source == "claude_code"` の厳密一致**で判定しており、`manual:claude_code` にマッチしなかった。結果、手動エントリは「キーチェーンからの token sync」「refresh 前の pre-emptive sync」「401/400 回復」のいずれも適用されず、凍結された古い refresh_token で refresh を試みて 400 → exhausted → `_available_entries` で除外 → `No Anthropic credentials`。**これが auto-relogin が常に「必要」に見えていた根本原因**（フォールバックエントリが構造的に自己回復不能だった）。
+
+**修正ファイル**: `~/.hermes/hermes-agent/agent/credential_pool.py`
+- 6箇所の source ガードを `entry.source == "claude_code"` / `!= "claude_code"` → `entry.source in ("claude_code", "manual:claude_code")` / `not in (...)` に拡張。該当行（概算）: 453, 761, 793, 883, 1049, 1189。
+- **line ~1780 は触らない**（`_prune_stale_seeded_entries` の `in {"claude_code", "hermes_pkce"}`）。手動エントリは `_is_manual_source` で別途保護済み。
+
+**やってはいけない誤対処**: 最初「`manual:` が誤りだ」と判断して source を `claude_code` に改名したが、これは **prune 保護を外す** → anthropic は明示 provider でないため seed されず active_sources に入らない → `_prune_stale_seeded_entries` がエントリを**削除** → anthropic pool が空に。`manual:` は正しい。直すのは source 名ではなくガードの方。
+
+**併せて実施したクリーンアップ（2026-05-28）**:
+- auth.json から亡霊エントリ `env:CLAUDE_CODE_OAUTH_TOKEN` を削除 + `suppressed_sources.anthropic` に追加。出所はレガシー `hermes-oauth-refresh` ジョブが毎時キーチェーントークンを `~/.hermes/.env` に `CLAUDE_CODE_OAUTH_TOKEN=` として書き写していたこと → `_seed_from_env` が refresh 不能な静的エントリ化 → 本命エントリの健全性をマスクし、pool を非 stuck に保って auto-relogin を「誤った理由で」休眠させていた。
+- `~/.hermes/.env` から `CLAUDE_CODE_OAUTH_TOKEN` / `_EXPIRES_AT` の2行を削除（バックアップ `~/.hermes/.env.env.bak-cleanup`）。
+- **レガシー launchd ジョブ `com.hermesagent.oauth-refresh` を停止**（bootout + plist を `.disabled` へ退避）。Hermes が今やキーチェーンを直接読むため冗長、かつ亡霊の製造元。アラート機能は `auth-health-monitor` が代替。
+
+**最終状態**: anthropic エントリは `manual:claude_code` 1本（prune 保護あり・自己回復可能）。Playwright `auto-relogin` は毎時の応急処置ではなく、**refresh_token が revoke された回復不能ケース専用の休眠セーフティネット**に格下げ。auth.json バックアップ: `~/.hermes/auth.json.bak-*`。
+
+**hermes update 後の再適用**: `credential_pool.py` の6箇所のガード拡張を再投入。anthropic が空 pool で動かなくなったら手動エントリが prune された可能性 → `bak-finalize` バックアップからエントリをコピーし、キーチェーン新トークンを注入、`source: manual:claude_code` を維持して auth.json に書き戻す。
+
 ### 10. キーチェーン `Claude Code-credentials` エントリの account 名分裂（2026-05-27修正）
 
 **症状**: `claude auth status` は `loggedIn: true` を返すのに、Hermes 側だけ `credential refresh failed ... HTTP 400` → `marking entry exhausted` を繰り返し、`No Anthropic credentials found` で全 Anthropic 呼び出しが失敗。auto-relogin（launchd 1時間ジョブ）の `claude auth login` 自体は毎回成功しているのに、Hermes に伝わらない。
