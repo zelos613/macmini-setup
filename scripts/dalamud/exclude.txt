@@ -1,0 +1,22 @@
+# Dalamud finder 除外リスト
+# 1行1エントリ。先頭 # はコメント。
+# - "owner/repo" 形式で完全一致除外
+# - "owner/" で始まればそのowner全リポジトリ除外
+# - "keyword:XXX" で説明文(description)に含まれる場合除外（小文字一致）
+# - "lang:XX" でリポジトリの言語の説明文に含まれる場合（簡易判定）
+
+# --- フレームワーク本体・マニフェスト集 (記事ネタにしづらい) ---
+goatcorp/Dalamud
+goatcorp/DalamudPluginsD17
+goatcorp/DalamudPlugins
+UnknownX7/DalamudPluginRepo
+
+# --- 中国語専用プラグイン集・国服向け ---
+keyword:国服
+keyword:汉化
+keyword:卫月
+keyword:中文
+MeowZWR/DalamudPlugin
+zhouhuichen741/dalamud-plugins
+
+# --- その他、記事化に向かないユーティリティ系（必要に応じて追加） ---
